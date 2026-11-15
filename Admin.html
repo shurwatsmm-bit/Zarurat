@@ -40,28 +40,133 @@ body:before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;back
 .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#eafff5;color:#03110a;padding:12px 18px;border-radius:14px;font-weight:800;z-index:99;box-shadow:0 15px 40px rgba(0,0,0,.5);animation:pop .35s}
 .easypaisa{background:linear-gradient(135deg,#7dffb8,#00e676,#00c2a8);color:#03110a;border-radius:26px;padding:18px;margin-top:14px;animation:glow 3s infinite}
 .hero h1{font-family:'Space Grotesk';font-size:clamp(38px,11vw,62px);line-height:.95;margin:18px 0 12px}
+
+/* ===== HEAVY UPGRADE ===== */
+.btn{position:relative;overflow:hidden}
+.btn:after{content:"";position:absolute;top:0;left:-80%;width:50%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);animation:btnShine 2.4s infinite}
+@keyframes btnShine{0%{left:-80%}60%,100%{left:130%}}
+.card{position:relative;overflow:hidden}
+.card:before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(120deg,transparent,rgba(0,230,118,.6),transparent,rgba(45,212,255,.6),transparent);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:.4s;pointer-events:none}
+.card:hover:before{opacity:1}
+.nav button:active{transform:scale(.9)}
+input:focus,textarea:focus,select:focus{animation:glow .6s}
+.sync{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#0f2a1e;border:1px solid #1f4a35;color:#7dffb8;padding:7px 14px;border-radius:999px;font-size:12px;font-weight:700;z-index:99;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.syncLive{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#0f2a1e;border:1px solid #1f4a35;color:#7dffb8;padding:7px 14px;border-radius:999px;font-size:12px;font-weight:700;z-index:99}
+@keyframes floatY{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.heroCard{animation:floatY 4s ease-in-out infinite}
+
 </style></head><body>
 <div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div><div id="app"></div>
 <script>
-// ===== REALTIME DATABASE - ZARORA =====
-// Database: zarora-f7526  |  URL neeche hai. Agar Firebase Rules me Auth chahiye to apni apiKey yahan daal do,
-// warna public-read/write rules par REST bina key ke bhi sync karega. Dono files isi ek URL se sync hoti hain.
+
+// ===== REALTIME DATABASE - ZARORA - FIXED VERSION =====
 const DB_URL = "https://zarora-f7526-default-rtdb.firebaseio.com/zarorat.json";
 const FIREBASE_CONFIG = { apiKey:"PASTE_YOUR_API_KEY_HERE_IF_NEEDED", authDomain:"zarora-f7526.firebaseapp.com", databaseURL:"https://zarora-f7526-default-rtdb.firebaseio.com", projectId:"zarora-f7526" };
-let DB=null, _saving=false, _lastJSON="", _syncTimer=null;
-const EMPTY_DB = ()=>({users:[],services:[],orders:[],deposits:[],tickets:[],notifications:[],coupons:[],announcements:[],categories:[],activity:[],settings:{panelName:"ZARORAT",minDeposit:50,referralBonus:5,supportMessage:"Ask the admin anything. Replies appear inside your ticket."},favorites:[],transactions:[]});
-async function loadDB(){ try{ const r=await fetch(DB_URL); const j=await r.json(); DB=j||EMPTY_DB(); for(const k in EMPTY_DB()) if(!DB[k]) DB[k]=EMPTY_DB()[k]; }catch(e){ DB=JSON.parse(localStorage.getItem("zarorat_backup")||"null")||EMPTY_DB(); } _lastJSON=JSON.stringify(DB); return DB; }
-async function saveDB(){ localStorage.setItem("zarorat_backup",JSON.stringify(DB)); const j=JSON.stringify(DB); if(j===_lastJSON) return; _lastJSON=j; _saving=true; try{ await fetch(DB_URL,{method:"PUT",headers:{"Content-Type":"application/json"},body:j}); }catch(e){} _saving=false; showSync(); }
+let DB=null, _saving=false, _lastJSON="", _syncTimer=null, DB_STATUS="checking...", DB_ERROR="";
+const EMPTY_DB = ()=>({users:[],services:[],orders:[],deposits:[],tickets:[],notifications:[],coupons:[],announcements:[],categories:[],activity:[],settings:{panelName:"ZARORAT",minDeposit:50,referralBonus:5,supportMessage:"Ask the support team anything. Replies appear inside your ticket."},favorites:[],transactions:[]});
+function setDBStatus(s, err){ DB_STATUS=s; DB_ERROR=err||""; let el=document.getElementById("dbStatusBox"); if(el){ el.innerHTML = s==="connected" ? "<span style='color:#00e676;font-weight:800'>● DATABASE CONNECTED • REAL-TIME ON</span> <span class='muted'>• "+(DB_ERROR||"")+"</span>" : "<span style='color:#ff8a94;font-weight:800'>● DATABASE NOT CONNECTED: "+err+"</span><br><span class='muted'>Firebase Console → Realtime Database → Rules me neeche wala rule lagao, phir page refresh karo.</span><br><code style='background:#08110e;padding:8px 10px;border-radius:10px;display:block;margin-top:8px;color:#7dffb8'>{ \"rules\": { \".read\": true, \".write\": true } }</code><br><button class='btn2' onclick='testConnection()'>🔄 Test Connection Again</button>"; el.style.display="block"; } updateSyncBadge(); }
+async function testConnection(){
+  setDBStatus("checking...", "Testing...");
+  try{
+    let r = await fetch(DB_URL+"?t="+Date.now());
+    if(!r.ok){ setDBStatus("blocked", "Firebase ne request rok di. Status: "+r.status+" - Rules me .read/.write true karo."); return false; }
+    let j = await r.json();
+    setDBStatus("connected", "GET OK • "+new Date().toLocaleTimeString());
+    return true;
+  }catch(e){ setDBStatus("blocked", "Network / CORS Error: "+e.message+" - Internet check karo aur Rules true karo."); return false; }
+}
+async function loadDB(){
+  try{
+    let r=await fetch(DB_URL+"?t="+Date.now());
+    if(!r.ok){ DB=JSON.parse(localStorage.getItem("zarorat_backup")||"null")||EMPTY_DB(); setDBStatus("blocked","GET failed Status "+r.status+" - Rules me .read true karo."); return DB; }
+    let j=await r.json(); DB=j||EMPTY_DB(); for(const k in EMPTY_DB()) if(!DB[k]) DB[k]=EMPTY_DB()[k];
+    setDBStatus("connected","Loaded from Firebase • "+new Date().toLocaleTimeString());
+  }catch(e){ DB=JSON.parse(localStorage.getItem("zarorat_backup")||"null")||EMPTY_DB(); setDBStatus("blocked","Network Error: "+e.message); }
+  _lastJSON=JSON.stringify(DB); return DB;
+}
+async function saveDB(){
+  localStorage.setItem("zarorat_backup",JSON.stringify(DB));
+  // Same-browser instant sync - doosri tab turant update hogi, Firebase fail bhi ho to bhi
+  try{ let bc=new BroadcastChannel("zarorat-sync"); bc.postMessage({type:"db", db:DB}); bc.close(); }catch(e){}
+  try{ localStorage.setItem("zarorat_broadcast", JSON.stringify({t:Date.now(), db:DB})); }catch(e){}
+  let j=JSON.stringify(DB); if(j===_lastJSON) return; _lastJSON=j; _saving=true;
+  try{
+    let r=await fetch(DB_URL,{method:"PUT",headers:{"Content-Type":"application/json"},body:j});
+    if(!r.ok){ setDBStatus("blocked","PUT failed Status "+r.status+" - Rules me .write true karo. Local me save ho gaya hai."); }
+    else setDBStatus("connected","Saved to Firebase • "+new Date().toLocaleTimeString());
+  }catch(e){ setDBStatus("blocked","Save Network Error: "+e.message); }
+  _saving=false; showSync();
+}
 function showSync(){ let el=document.getElementById("syncBadge"); if(!el){ el=document.createElement("div"); el.id="syncBadge"; el.className="sync"; el.innerHTML="<span class='live'></span> &nbsp;Synced • Real-time"; document.body.appendChild(el);} el.style.display="block"; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display="none",1800); }
-function startPolling(){ clearInterval(_syncTimer); _syncTimer=setInterval(async()=>{ if(_saving) return; try{ const r=await fetch(DB_URL+"?t="+Date.now()); const j=await r.json(); if(!j) return; const nj=JSON.stringify(j); if(nj!==_lastJSON){ DB=j; _lastJSON=nj; localStorage.setItem("zarorat_backup",nj); onRemoteChange&&onRemoteChange(); showSync(); } }catch(e){} },2500); }
-let onRemoteChange=null;
-function toast(msg){ let t=document.createElement("div"); t.className="toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2200); }
+function toast(msg){ let t=document.createElement("div"); t.className="toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function confetti(){ for(let i=0;i<28;i++){ let c=document.createElement("div"); c.style.cssText=`position:fixed;top:-10px;left:${Math.random()*100}vw;width:8px;height:12px;background:${["#00e676","#2dd4ff","#c8ff3d","#fff"][i%4]};z-index:200;border-radius:2px;animation:confetti ${1+Math.random()}s ease-in forwards`; document.body.appendChild(c); setTimeout(()=>c.remove(),2200);} }
 function uid(){ return Math.random().toString(36).slice(2,9)+Date.now().toString(36); }
 function esc(s){ return String(s||"").replace(/</g,"&lt;"); }
 function money(n){ return "Rs "+(n||0); }
 async function log(t){ DB.activity.unshift({text:t,createdAt:new Date().toISOString()}); await saveDB(); }
 async function notify(u2,t,m){ DB.notifications.unshift({id:uid(),userId:u2,title:t,message:m,readBy:[],createdAt:new Date().toISOString()}); await saveDB(); }
+// Same-browser live sync - BroadcastChannel + storage event
+try{ let bc2=new BroadcastChannel("zarorat-sync"); bc2.onmessage=(e)=>{ if(e.data && e.data.db){ let nj=JSON.stringify(e.data.db); if(nj!==_lastJSON){ DB=e.data.db; _lastJSON=nj; 
+function ensureDBBox(){ let el=document.getElementById("dbStatusBox"); if(!el){ el=document.createElement("div"); el.id="dbStatusBox"; el.style.cssText="position:relative;z-index:5;background:#0a1511;border:1px solid #1e332b;border-radius:14px;padding:12px 14px;margin:12px 16px 0;font-size:13px;display:none"; let wrap=document.querySelector(".wrap")||document.querySelector(".wrap-wide")||document.body; wrap.prepend(el); } return el; }
+let _origRender = render; render = function(){ _origRender(); ensureDBBox(); setDBStatus(DB_STATUS, DB_ERROR); };
+
+onRemoteChange&&onRemoteChange(); } } }; }catch(e){}
+window.addEventListener("storage",(e)=>{ if(e.key==="zarorat_broadcast" && e.newValue){ try{ let d=JSON.parse(e.newValue); let nj=JSON.stringify(d.db); if(nj!==_lastJSON){ DB=d.db; _lastJSON=nj; onRemoteChange&&onRemoteChange(); } }catch(err){} } });
+
+// ===== FIXED ULTRA-FAST SYNC + BUTTON FIX =====
+let _lastInteraction = 0, _renderQueued = false, _sse = null, _lastSyncMs = 0;
+document.addEventListener('pointerdown', ()=>{ _lastInteraction = Date.now(); }, true);
+document.addEventListener('input', ()=>{ _lastInteraction = Date.now(); }, true);
+function isTyping(){ let a=document.activeElement; return a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'); }
+function safeRender(force){
+  // Agar user type kar raha hai ya abhi-abhi click kiya hai to render rok do - warna button/input toot jata hai
+  if(!force && (isTyping() || Date.now()-_lastInteraction < 600)){ _renderQueued=true; setTimeout(()=>{ if(_renderQueued){ _renderQueued=false; safeRender(true); } }, 900); return; }
+  // Input values save karo taake render ke baad wapas aa jayein
+  let saved={}; document.querySelectorAll('input,textarea,select').forEach(el=>{ if(el.id) saved[el.id]=el.value; });
+  try{ render(); }catch(e){ console.log(e); }
+  Object.keys(saved).forEach(id=>{ let el=document.getElementById(id); if(el && document.activeElement!==el) el.value=saved[id]; });
+}
+function startUltraSync(){
+  // 1) Firebase Realtime SSE stream - sab se fast, server push karta hai
+  try{
+    if(_sse) _sse.close();
+    _sse = new EventSource(DB_URL);
+    _sse.onmessage = (ev)=>{
+      try{
+        let parsed = JSON.parse(ev.data);
+        if(parsed && parsed.data && typeof parsed.data==='object'){
+          let nj = JSON.stringify(parsed.data);
+          if(nj!==_lastJSON){ DB=parsed.data; _lastJSON=nj; localStorage.setItem("zarorat_backup",nj); _lastSyncMs=Date.now(); updateSyncBadge(); onRemoteChange&&onRemoteChange(); }
+        }
+      }catch(e){}
+    };
+    _sse.onerror = ()=>{ /* fallback polling sambhal lega */ };
+  }catch(e){}
+  // 2) Fast polling fallback - har 800ms, sirf tab jab SSE se update na aaya ho
+  clearInterval(_syncTimer);
+  _syncTimer = setInterval(async()=>{
+    if(_saving) return;
+    try{
+      let t0=performance.now();
+      let r=await fetch(DB_URL+"?t="+Date.now());
+      let j=await r.json(); if(!j) return;
+      let nj=JSON.stringify(j);
+      if(nj!==_lastJSON){ DB=j; _lastJSON=nj; localStorage.setItem("zarorat_backup",nj); _lastSyncMs=Date.now(); updateSyncBadge(); onRemoteChange&&onRemoteChange(); }
+      let ms=Math.round(performance.now()-t0); let el=document.getElementById("syncMs"); if(el) el.textContent=ms+"ms";
+    }catch(e){}
+  }, 800);
+}
+function updateSyncBadge(){
+  let el=document.getElementById("syncBadge");
+  if(!el){ el=document.createElement("div"); el.id="syncBadge"; el.className="sync"; document.body.appendChild(el); }
+  el.innerHTML="<span class='live'></span> &nbsp;Live Sync • <span id='syncMs'>0ms</span> • Real-time";
+  el.style.display="block";
+  clearTimeout(el._t); el._t=setTimeout(()=>{ el.style.display="block"; }, 10000);
+}
+// Purani polling ko ultra sync se replace karo
+startPolling = startUltraSync;
+// Global exports - taake har button 100% kaam kare, chahe preview ho ya file
+// (functions neeche define hongi, is liye end me dubara export karenge)
 
 const KEY="ZARORAT-ADM-2026";
 let adminTab="dashboard", authed=localStorage.getItem("zarorat_admin")==="1";
@@ -113,6 +218,8 @@ async function addAnn(){ let t=document.getElementById("aTitle").value.trim(), m
 async function toggleAnn(id){ let a=DB.announcements.find(x=>x.id===id); a.enabled=!a.enabled; await save(); render(); }
 async function delAnn(id){ DB.announcements=DB.announcements.filter(a=>a.id!==id); await save(); render(); }
 async function saveSettings(){ DB.settings={panelName:document.getElementById("setName").value.trim()||"ZARORAT",minDeposit:Number(document.getElementById("setMin").value)||50,referralBonus:Number(document.getElementById("setBonus").value)||5,supportMessage:document.getElementById("setSup").value.trim()}; await save(); toast("Settings live save ho gayi"); render(); }
-onRemoteChange=()=>{ render(); };
-(async()=>{ await loadDB(); render(); startPolling(); })();
+onRemoteChange=()=>{ safeRender(); };
+(async()=>{ await loadDB(); render(); startUltraSync(); updateSyncBadge(); })();
+
+window.testConnection=testConnection;
 </script></body></html>
